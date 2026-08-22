@@ -132,3 +132,21 @@ jobs:
           set -eo pipefail
           gh release create "$TAG" --title "$TAG" --generate-notes || true
           gh release upload "$TAG" dist/*.deb --clobber
+
+      - name: Publish debs to private apt repository
+        env:
+          APT_REPO_URL: ${{ secrets.APT_REPO_URL }}
+          APT_REPO_USER: ${{ secrets.APT_REPO_USER }}
+          APT_REPO_PASS: ${{ secrets.APT_REPO_PASS }}
+        run: |
+          set -eo pipefail
+          [[ -n "$APT_REPO_URL" && -n "$APT_REPO_USER" ]] || { echo "apt 仓库 secrets 未配置,跳过" >&2; exit 0; }
+          for deb in dist/*.deb; do
+            name="$(basename "$deb")"
+            echo "uploading: $name"
+            # 后端约定:PUT $URL/upload/<文件名>(WebDAV 风格)
+            curl -fsS --retry 3 --connect-timeout 15 \
+              -u "$APT_REPO_USER:$APT_REPO_PASS" \
+              -T "$deb" "$APT_REPO_URL/upload/$name"
+          done
+          echo "uploaded: $(ls dist/*.deb | wc -l) package(s)"
