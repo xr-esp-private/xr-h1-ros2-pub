@@ -1,0 +1,132 @@
+name: build-deb
+
+# 公开仓库只承载本流水线与发布产物,不承载源码。
+# 由私有仓库 release-dispatch 工作流触发:构建时用 PRIVATE_SOURCE_TOKEN
+# 拉取私有仓库对应 commit(仅存在于 runner 临时工作区),双架构原生构建、
+# 测试后发布 Release 资产(xrlab-ros2_<ver>_<arch>.deb)。
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "发布 tag(如 v0.4.0-rc8),同时作为 deb 版本号"
+        required: true
+        type: string
+      ref:
+        description: "私有仓库 commit/tag/branch"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  PRIVATE_REPO: xr-esp-private/xr-h1-ros2
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: build-deb-${{ inputs.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ros:jazzy
+    timeout-minutes: 40
+    steps:
+      - name: Install build prerequisites
+        env:
+          PRIVATE_SOURCE_TOKEN: ${{ secrets.PRIVATE_SOURCE_TOKEN }}
+        run: |
+          set -eo pipefail
+          [[ -n "$PRIVATE_SOURCE_TOKEN" ]] || { echo "PUBLIC repo secret PRIVATE_SOURCE_TOKEN 未配置" >&2; exit 2; }
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            git rsync dpkg-dev ca-certificates python3-pip python3-setuptools python3-wheel
+
+      - name: Fetch private source at requested ref
+        env:
+          PRIVATE_SOURCE_TOKEN: ${{ secrets.PRIVATE_SOURCE_TOKEN }}
+          REF: ${{ inputs.ref }}
+        run: |
+          set -eo pipefail
+          git init source
+          cd source
+          git remote add origin "https://x-access-token:${PRIVATE_SOURCE_TOKEN}@github.com/${PRIVATE_REPO}.git"
+          git fetch --depth 1 origin "$REF"
+          git checkout FETCH_HEAD
+          git log --oneline -1
+
+      - name: Resolve workspace dependencies (rosdep)
+        working-directory: source
+        run: |
+          set -eo pipefail
+          rosdep init 2>/dev/null || true
+          rosdep update --rosdistro jazzy
+          # --ignore-src:工作区内(含厂商模型包)一律不查外部源
+          rosdep install --from-paths src --ignore-src -y --rosdistro jazzy
+
+      - name: Build workspace (merge-install)
+        working-directory: source
+        run: |
+          set -eo pipefail
+          . /opt/ros/jazzy/setup.bash
+          colcon build --merge-install
+
+      - name: Run workspace tests
+        working-directory: source
+        run: |
+          set -eo pipefail
+          . /opt/ros/jazzy/setup.bash
+          . install/setup.bash
+          colcon test --merge-install --event-handlers console_cohesion+
+          # 有任何 failure/error 即非零退出,阻断发布
+          colcon test-result --verbose
+
+      - name: Assemble deb package
+        working-directory: source
+        env:
+          VERSION: ${{ inputs.tag }}
+        run: |
+          set -eo pipefail
+          packaging/build-deb.sh --output-dir "${{ github.workspace }}/dist" --version "${VERSION#v}"
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.arch }}
+          path: dist/*.deb
+          if-no-files-found: error
+
+  release:
+    needs: [build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all architecture artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release with debs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -eo pipefail
+          gh release create "$TAG" --title "$TAG" --generate-notes || true
+          gh release upload "$TAG" dist/*.deb --clobber
