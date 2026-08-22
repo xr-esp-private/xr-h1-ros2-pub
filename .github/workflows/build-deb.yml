@@ -100,7 +100,9 @@ jobs:
           VERSION: ${{ inputs.tag }}
         run: |
           set -eo pipefail
-          packaging/build-deb.sh --output-dir "${{ github.workspace }}/dist" --version "${VERSION#v}"
+          # 用运行时环境变量而非 ${{ github.workspace }}:容器作业中后者是
+          # 宿主机路径(/home/runner/...),在容器内不可见,产物会写丢。
+          packaging/build-deb.sh --output-dir "$GITHUB_WORKSPACE/dist" --version "${VERSION#v}"
 
       - name: Upload package artifact
         uses: actions/upload-artifact@v4
