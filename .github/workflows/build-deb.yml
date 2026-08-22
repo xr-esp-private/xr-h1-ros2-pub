@@ -15,6 +15,11 @@ on:
         description: "私有仓库 commit/tag/branch"
         required: true
         type: string
+      notes:
+        description: "Release notes(私有 CHANGELOG 对应段落;空=自动生成)"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -128,12 +133,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ inputs.tag }}
+          NOTES: ${{ inputs.notes }}
         run: |
           set -eo pipefail
-          gh release create "$TAG" --title "$TAG" --generate-notes || true
+          if [[ -n "$NOTES" ]]; then
+            printf '%s\n' "$NOTES" > release-notes.md
+            gh release create "$TAG" --title "$TAG" --notes-file release-notes.md || true
+          else
+            gh release create "$TAG" --title "$TAG" --generate-notes || true
+          fi
           gh release upload "$TAG" dist/*.deb --clobber
 
+      # apt 仓库后端调试期暂不阻断发版;仓库修好后删除下一行恢复严格模式
       - name: Publish debs to private apt repository
+        continue-on-error: true
         env:
           APT_REPO_URL: ${{ secrets.APT_REPO_URL }}
           APT_REPO_USER: ${{ secrets.APT_REPO_USER }}
