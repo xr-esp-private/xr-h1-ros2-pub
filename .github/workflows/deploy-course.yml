@@ -1,14 +1,17 @@
 name: deploy-course
 
-# 客户使用教程静态站（course/ 目录）:普通推送即重建发布到 GitHub Pages。
-# 与 build-deb 互不影响:deb 只由 workflow_dispatch 派发,本工作流只监听 push。
+# 客户使用教程静态站发布流水线(权威定义在私有仓库 course/pipeline/ 本文件,
+# 由私有仓库 course-dispatch 工作流同步到本仓库并派发)。
+# 与 build-deb 同构:课程源码不落公开 git,构建时用 PRIVATE_SOURCE_TOKEN
+# 拉取私有仓库对应 commit 的 course/ 目录到 runner 临时工作区,构建后
+# 发布到 GitHub Pages。仅 workflow_dispatch 触发,不接受 push 源码。
 on:
-  push:
-    branches: [main]
-    paths:
-      - "course/**"
-      - ".github/workflows/deploy-course.yml"
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "私有仓库 xr-esp-private/xr-h1-ros2 的 commit/branch(课程源码位置)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -21,23 +24,47 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - name: Resolve private source ref
+        id: srcref
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_SOURCE_TOKEN }}
+        run: |
+          set -eo pipefail
+          REF="${{ inputs.ref }}"
+          [[ -n "$REF" ]] || REF=$(gh api repos/xr-esp-private/xr-h1-ros2/commits/main --jq .sha)
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "building course from xr-esp-private/xr-h1-ros2@$REF"
+
+      - name: Check out private course sources
+        uses: actions/checkout@v4
+        with:
+          repository: xr-esp-private/xr-h1-ros2
+          ref: ${{ steps.srcref.outputs.ref }}
+          token: ${{ secrets.PRIVATE_SOURCE_TOKEN }}
+          sparse-checkout: course
+          path: private-src
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install deps
-        run: pip install markdown
+
       - name: Build site
-        run: python3 course/build_site.py --out dist
+        run: |
+          set -eo pipefail
+          pip install markdown
+          python3 private-src/course/build_site.py --out dist
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
 
   deploy:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
