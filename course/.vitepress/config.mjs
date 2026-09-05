@@ -35,7 +35,7 @@ export default defineConfig({
       {
         text: "XR-AIH1 控制台使用教程",
         items: [
-          { text: "课程首页", link: "/README" },
+          { text: "课程首页", link: "/" },
           { text: "01 · 快速上手与总览", link: "/01-overview" },
           { text: "02 · 手柄状态监控", link: "/02-gamepad" },
           { text: "03 · 标定中心", link: "/03-calibration" },
