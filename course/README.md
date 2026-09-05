@@ -51,4 +51,4 @@ npm run build      # 构建静态站到 .vitepress/dist
 8. [第八章：ROS 话题速查](08-topics.md) — 可订阅的状态话题与命令链路参考
 
 ---
-*本课程由 code-to-course 生成于 2026-09-05，对应代码版本 `a98a2de`（branch `whole-body`），截图来自真机在线控制台（XR-AIH1 产品，console v0.3.0）逐步实操截取。*
+*本课程由 code-to-course 生成，最近更新 2026-09-05（第二章随手柄机型自动识别改造重写，截图为北通 BTP-KP20 真机实时画面），代码版本 `aa5a0c3` + 工作区待提交改动（branch `whole-body`）。截图来自真机在线控制台（XR-AIH1 产品）逐步实操截取。*
