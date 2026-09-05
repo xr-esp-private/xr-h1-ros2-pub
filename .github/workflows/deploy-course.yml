@@ -3,8 +3,8 @@ name: deploy-course
 # 客户使用教程静态站发布流水线(权威定义在私有仓库 course/pipeline/ 本文件,
 # 由私有仓库 course-dispatch 工作流同步到本仓库并派发)。
 # 与 build-deb 同构:课程源码不落公开 git,构建时用 PRIVATE_SOURCE_TOKEN
-# 拉取私有仓库对应 commit 的 course/ 目录到 runner 临时工作区,构建后
-# 发布到 GitHub Pages。仅 workflow_dispatch 触发,不接受 push 源码。
+# 拉取私有仓库对应 commit 的 course/ 目录(VitePress 源)到 runner 临时
+# 工作区,构建后发布到 GitHub Pages。仅 workflow_dispatch 触发,不接受 push 源码。
 on:
   workflow_dispatch:
     inputs:
@@ -47,19 +47,22 @@ jobs:
           sparse-checkout: course
           path: private-src
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.12"
+          node-version: 22
+          cache: npm
+          cache-dependency-path: private-src/course/package-lock.json
 
-      - name: Build site
+      - name: Build site (VitePress)
         run: |
           set -eo pipefail
-          pip install markdown
-          python3 private-src/course/build_site.py --out dist
+          cd private-src/course
+          npm ci
+          npx vitepress build
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: private-src/course/.vitepress/dist
 
   deploy:
     needs: build
